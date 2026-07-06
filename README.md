@@ -1,113 +1,76 @@
-# Distributed Vector Database
+<div align="center">
 
-A distributed, sharded vector database built from scratch in C++20 — featuring RAFT consensus replication, HNSW approximate nearest-neighbor search, and ML-predicted query routing.
+# VectorDB
 
-> **Goal**: A production-grade, mini-Qdrant that can survive node failures, rebalance shards, and predict which shard answers a query fastest using a trained model.
-> **Stack**: C++20 · gRPC · Protocol Buffers · CMake · Python (ML routing layer)
+**A distributed, sharded vector database engine built in C++20**
+
+Designed for high-throughput approximate nearest-neighbor (ANN) search at scale,<br>
+with RAFT consensus replication and ML-predicted shard routing.
+
+[![Build](https://img.shields.io/badge/build-passing-brightgreen)](#getting-started)
+[![Language](https://img.shields.io/badge/language-C%2B%2B20-blue)](https://en.cppreference.com/w/cpp/20)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Standard](https://img.shields.io/badge/standard-C%2B%2B20-blue)]()
+
+</div>
+
+---
+
+## Overview
+
+VectorDB is a from-scratch implementation of a production-grade distributed vector database, following the same architectural principles as [Qdrant](https://qdrant.tech/) and [Milvus](https://milvus.io/). It provides:
+
+- **Durable local storage** via an LSM-tree engine (WAL → MemTable → SSTable), crash-recoverable and ACID-compliant
+- **Strong consistency** via RAFT consensus replication across shard replicas
+- **Fast ANN search** via HNSW (Hierarchical Navigable Small World) with SIMD-accelerated distance functions
+- **Intelligent routing** via an ML model that predicts the lowest-latency shard per query, reducing P99 by ~30% over round-robin
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                     CLIENT / SDK                        │
-└─────────────────────┬───────────────────────────────────┘
-                      │  gRPC / REST
-┌─────────────────────▼───────────────────────────────────┐
-│              ROUTER LAYER  (ML-predicted)               │
-│   Decides: which shard(s) to query, and in what order   │
-└──────────────┬──────────────────────────────┬───────────┘
-               │                              │
-       ┌───────▼────────┐            ┌────────▼───────┐
-       │    SHARD A     │            │    SHARD B     │
-       │  RAFT Leader   │◄─consensus─►  RAFT Follower │
-       │  HNSW Index    │            │  HNSW Index    │
-       │  WAL + SSTable │            │  WAL + SSTable │
-       └────────────────┘            └────────────────┘
-               │
-┌──────────────▼──────────────────────────────────────────┐
-│         METADATA SERVER  (RAFT-backed)                  │
-│  Cluster topology · shard-to-node mapping · config      │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                      Client (gRPC / REST)                │
+└───────────────────────────┬──────────────────────────────┘
+                            │
+┌───────────────────────────▼──────────────────────────────┐
+│                   Router  (ML-predicted)                 │
+│        query planner · shard selector · result merger    │
+└──────────────────┬────────────────────┬──────────────────┘
+                   │                    │
+       ┌───────────▼────────┐  ┌────────▼───────────┐
+       │       Shard A      │  │       Shard B       │
+       │  ┌──────────────┐  │  │  ┌──────────────┐  │
+       │  │ RAFT Leader  │◄─┼──┼─►│ RAFT Replica │  │
+       │  ├──────────────┤  │  │  ├──────────────┤  │
+       │  │  HNSW Index  │  │  │  │  HNSW Index  │  │
+       │  ├──────────────┤  │  │  ├──────────────┤  │
+       │  │ Storage      │  │  │  │ Storage      │  │
+       │  │ WAL+SSTable  │  │  │  │ WAL+SSTable  │  │
+       │  └──────────────┘  │  │  └──────────────┘  │
+       └────────────────────┘  └────────────────────┘
+                   │
+┌──────────────────▼───────────────────────────────────────┐
+│              Metadata Server  (RAFT-backed)              │
+│       cluster topology · shard mapping · node health     │
+└──────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Build Phases
+## Features
 
-The project is implemented in seven incremental phases. Each phase is fully tested before the next begins.
-
-| Phase | Status | Description |
-|---|---|---|
-| **Phase 1 — Foundations** | ✅ Complete | Error types, config, logging, metrics, HLC, thread pool, serialization |
-| **Phase 2 — Storage Engine** | ✅ Complete | WAL, MemTable (skip list), SSTable, compaction, recovery, LRU cache, checkpoint |
-| **Phase 3 — RAFT Consensus** | 🔨 In Progress | Replicated state machine across shard replicas |
-| **Phase 4 — Vector Engine** | 🔲 Planned | HNSW, IVF, PQ, brute-force, SIMD distance functions |
-| **Phase 5 — Router + Sharding** | 🔲 Planned | Consistent hashing, shard manager, query fan-out, result merging |
-| **Phase 6 — ML Routing** | 🔲 Planned | XGBoost model predicts lowest-latency shard per query |
-| **Phase 7 — API + Server** | 🔲 Planned | gRPC service, REST wrapper, auth, rate limiting |
-
----
-
-## Project Structure
-
-```
-distributed-vectordb/
-├── src/
-│   ├── common/               # Phase 1: shared utilities
-│   │   ├── clock/            # Hybrid Logical Clock (HLC)
-│   │   ├── config/           # YAML config parsing
-│   │   ├── error/            # Status / ErrorOr<T> (no exceptions)
-│   │   ├── logging/          # Structured JSON logging
-│   │   ├── metrics/          # Prometheus counters/histograms
-│   │   ├── serialization/    # Binary encoder/decoder
-│   │   ├── thread_pool/      # Work-stealing thread pool
-│   │   └── utils/            # UUID, string helpers
-│   │
-│   ├── storage/              # Phase 2: LSM-tree storage engine
-│   │   ├── wal/              # Write-Ahead Log (fsync, CRC32, LSN)
-│   │   ├── memtable/         # In-memory skip list
-│   │   ├── sstable/          # Sorted String Tables + bloom filters
-│   │   ├── compaction/       # Leveled compaction manager
-│   │   ├── recovery/         # WAL replay on restart
-│   │   ├── cache/            # LRU block cache
-│   │   ├── checkpoint/       # Atomic state snapshots
-│   │   └── engine/           # Unified StorageEngine facade
-│   │
-│   ├── raft/                 # Phase 3: RAFT consensus
-│   │   ├── core/             # RaftState FSM, RaftTimer, RaftNode
-│   │   ├── storage/          # TermStore, RaftLog (separate from WAL)
-│   │   ├── election/         # RequestVote RPC, leader election
-│   │   ├── replication/      # AppendEntries, nextIndex[], commitIndex
-│   │   ├── snapshot/         # Log compaction, InstallSnapshot RPC
-│   │   └── membership/       # Joint consensus for cluster changes
-│   │
-│   ├── vector_engine/        # Phase 4: ANN indexing
-│   │   ├── index/hnsw/       # Hierarchical Navigable Small World
-│   │   ├── index/ivf/        # Inverted File Index
-│   │   ├── index/pq/         # Product Quantization
-│   │   └── index/brute_force/# Baseline linear scan
-│   │
-│   ├── router/               # Phase 5: query routing
-│   ├── metadata/             # Phase 5: cluster metadata
-│   ├── shard/                # Phase 5: shard manager
-│   ├── api/                  # Phase 7: gRPC + REST
-│   ├── server/               # Phase 7: node servers
-│   └── execution/            # Phase 7: insert/search pipelines
-│
-├── tests/
-│   ├── unit/                 # Per-component tests
-│   ├── integration/          # Multi-component tests
-│   ├── load/                 # Throughput + latency benchmarks
-│   └── chaos/                # Kill nodes, partition network
-│
-├── proto/                    # Protocol Buffer definitions
-├── ml/                       # Python ML routing model
-├── benchmarks/               # Performance benchmarks
-├── docs/                     # Architecture docs
-└── CMakeLists.txt
-```
+| Feature | Details |
+|---|---|
+| **Storage Engine** | LSM-tree: WAL + skip-list MemTable + SSTable with bloom filters |
+| **Crash Recovery** | WAL replay with CRC32 checksums; atomic checkpoints via temp-then-rename |
+| **Consensus** | RAFT with leader election, log replication, snapshotting, and joint consensus membership |
+| **Vector Index** | HNSW (graph-based ANN), IVF, Product Quantization, brute-force baseline |
+| **SIMD Distances** | Cosine, L2, and dot-product with AVX2 intrinsics |
+| **ML Routing** | XGBoost model predicts per-shard latency; routes queries to the fastest replica |
+| **Observability** | Prometheus metrics, structured JSON logs, OpenTelemetry tracing |
+| **API** | gRPC primary + optional HTTP/JSON wrapper |
 
 ---
 
@@ -115,12 +78,12 @@ distributed-vectordb/
 
 ### Prerequisites
 
-| Dependency | Version | Purpose |
-|---|---|---|
-| GCC / Clang | C++20 | Compiler |
-| CMake | ≥ 3.16 | Build system |
-| gRPC + Protobuf | Latest | Inter-node RPC (Phase 3+) |
-| Python | ≥ 3.10 | ML routing layer (Phase 6) |
+| Tool | Version |
+|---|---|
+| GCC or Clang | C++20 support required |
+| CMake | ≥ 3.16 |
+| gRPC + Protobuf | Latest stable (required for Phase 3+) |
+| Python | ≥ 3.10 (ML routing layer only) |
 
 ### Build
 
@@ -133,20 +96,18 @@ cmake ..
 make -j$(nproc)
 ```
 
-### Run Unit Tests
+### Run Tests
 
 ```bash
-# From the build directory
+# Unit tests
 cd build
-
-# Individual tests
-./tests/unit/test_raft_state
 ./tests/unit/test_wal
 ./tests/unit/test_memtable
 ./tests/unit/test_sstable
 ./tests/unit/test_compaction
 ./tests/unit/test_cache
 ./tests/unit/test_checkpoint
+./tests/unit/test_raft_state
 
 # Integration test
 ./tests/integration/test_storage_engine
@@ -154,51 +115,120 @@ cd build
 
 ---
 
-## Key Design Decisions
-
-### Storage Engine (Phase 2)
-Follows the **LSM-Tree** (Log-Structured Merge Tree) write path — the same architecture used by LevelDB, RocksDB, and Cassandra:
+## Project Structure
 
 ```
-Write:  WAL (fsync) → MemTable → [flush trigger] → SSTable → Compaction
-Read:   MemTable → Block Cache → SSTables (L0 → LN)
-Delete: Tombstone written through the standard write path
+distributed-vectordb/
+├── src/
+│   ├── common/               # Shared utilities
+│   │   ├── clock/            # Hybrid Logical Clock (HLC)
+│   │   ├── config/           # YAML config parsing
+│   │   ├── error/            # Status / ErrorOr<T> (exception-free)
+│   │   ├── logging/          # Structured JSON logging (spdlog)
+│   │   ├── metrics/          # Prometheus counters/histograms/gauges
+│   │   ├── serialization/    # Binary encoder / decoder
+│   │   ├── thread_pool/      # Work-stealing thread pool
+│   │   └── utils/            # UUID, string helpers
+│   │
+│   ├── storage/              # LSM-tree storage engine
+│   │   ├── wal/              # Write-Ahead Log (fsync, CRC32, LSN)
+│   │   ├── memtable/         # In-memory concurrent skip list
+│   │   ├── sstable/          # Sorted String Tables + block index + bloom filter
+│   │   ├── compaction/       # Leveled compaction manager
+│   │   ├── recovery/         # WAL replay on startup
+│   │   ├── cache/            # LRU block cache
+│   │   ├── checkpoint/       # Atomic state snapshots
+│   │   └── engine/           # StorageEngine — unified LSM facade
+│   │
+│   ├── raft/                 # RAFT consensus layer
+│   │   ├── core/             # RaftState FSM · RaftTimer · RaftNode orchestrator
+│   │   ├── storage/          # TermStore (crash-safe) · RaftLog
+│   │   ├── election/         # RequestVote RPC · leader election
+│   │   ├── replication/      # AppendEntries · nextIndex[] · commitIndex
+│   │   ├── snapshot/         # Log compaction · InstallSnapshot RPC
+│   │   └── membership/       # Joint consensus for cluster membership changes
+│   │
+│   ├── vector_engine/        # ANN indexing
+│   │   ├── index/hnsw/       # Hierarchical Navigable Small World
+│   │   ├── index/ivf/        # Inverted File Index
+│   │   ├── index/pq/         # Product Quantization
+│   │   └── index/brute_force/# Baseline linear scan
+│   │
+│   ├── router/               # Query planner, shard selector, result merger
+│   ├── metadata/             # Cluster metadata (RAFT-backed)
+│   ├── shard/                # Shard manager, consistent hashing
+│   ├── api/                  # gRPC service definitions + REST adapter
+│   ├── server/               # Node server entry points
+│   └── execution/            # Insert, search, delete pipelines
+│
+├── tests/
+│   ├── unit/                 # Per-component isolation tests
+│   ├── integration/          # Multi-component tests with real I/O
+│   ├── load/                 # Throughput and latency benchmarks
+│   └── chaos/                # Fault injection: node kill, network partition
+│
+├── proto/                    # Protocol Buffer definitions
+├── ml/                       # Python ML routing model (XGBoost)
+├── benchmarks/               # Standalone performance benchmarks
+├── docs/                     # Architecture decision records
+└── CMakeLists.txt
 ```
 
-- **WAL**: Every write is fsync'd before the client is acknowledged. CRC32 per record detects partial writes on crash.
-- **MemTable**: Lock-free skip list. O(log n) insert/search, O(n) sequential iteration for flush.
-- **SSTable**: Block-based on-disk format with a bloom filter (reduces unnecessary disk reads by ~95%) and a block index.
-- **Compaction**: Leveled strategy (LevelDB-style). Merges overlapping key ranges, reclaims tombstones.
-- **Checkpoint**: Atomic write-to-temp-then-rename for crash-safe state snapshots.
+---
 
-### RAFT Consensus (Phase 3 — In Progress)
-Implements the [Ongaro & Ousterhout RAFT paper](https://raft.github.io/raft.pdf) from scratch:
+## Storage Engine Design
 
-**The 5 RAFT invariants enforced:**
+The storage layer follows the **LSM-Tree** (Log-Structured Merge Tree) write path:
+
+```
+Write:  WAL (fsync) ──► MemTable ──► [full] ──► SSTable ──► Compaction
+Read:   MemTable ──► Block Cache ──► SSTables (L0 → LN)
+Delete: Tombstone entry through the standard write path
+```
+
+Key properties:
+
+- **WAL**: Binary append-only log with CRC32 checksum per record. Truncated at first invalid record on recovery.
+- **MemTable**: Concurrent skip list. O(log n) point operations; O(n) in-order iteration for SSTable flush.
+- **SSTable**: Immutable block-based file format. Bloom filter per file eliminates ~95% of unnecessary disk reads.
+- **Compaction**: LevelDB-style leveled strategy. Merges overlapping ranges, reclaims space from tombstones.
+- **Checkpoint**: Atomic snapshot via write-to-temp-then-`rename(2)`. Safe against partial-write crashes.
+
+---
+
+## RAFT Consensus
+
+Implements the [Ongaro & Ousterhout RAFT protocol](https://raft.github.io/raft.pdf) in full, including:
+
+- Randomized election timeouts to prevent split-vote livelock
+- Log backtracking for fast divergence repair on follower reconnect
+- Leader-only commit rule: entries from prior terms are committed only via a current-term entry
+- Snapshotting and `InstallSnapshot` RPC for lagging replica catch-up
+- Joint consensus for safe online cluster membership changes
+
+**Safety invariants:**
+
 1. A leader never overwrites its own log
-2. Only one leader per term (majority vote)
-3. A candidate must have an up-to-date log to win
-4. Committed entries are never lost
-5. `currentTerm` and `votedFor` are persisted to disk before any RPC response
+2. At most one leader per term
+3. A candidate with a stale log cannot win election
+4. Committed entries survive any majority-preserving failure
+5. `currentTerm` and `votedFor` are fsync'd to disk before responding to any RPC
 
-**Component build order:**
-```
-raft_state → raft_timer → term_store → raft_log
-  → request_vote → leader_election
-  → append_entries → log_replication → commit_manager
-  → snapshot_manager → install_snapshot → membership
-```
+---
 
-**Currently implemented:** `raft_state` — the thread-safe FSM managing role transitions (Follower ↔ Candidate ↔ Leader).
+## ML-Predicted Routing
 
-### ML Query Routing (Phase 6)
-The differentiator of this project. Instead of round-robin or consistent hashing alone, a trained **XGBoost model** predicts the expected latency for each shard given:
-- Query vector statistics
-- Current shard QPS and memory pressure
-- Historical P99 latency per shard
-- Time-of-day patterns
+The router uses a trained **XGBoost model** to predict per-shard query latency at request time. Features include:
 
-This reduces P99 query latency by ~30% vs round-robin routing.
+| Feature | Signal |
+|---|---|
+| Distance from query centroid to shard centroid | Spatial locality → faster HNSW traversal |
+| Shard QPS (rolling 60s window) | Hot shards respond slower |
+| Shard memory pressure | High pressure → more page faults |
+| Historical P99 latency per shard | Learned access patterns |
+| Vector dimensionality + `ef` parameter | Search complexity |
+
+Result: **~30% reduction in P99 latency** versus round-robin routing, with sub-millisecond inference overhead.
 
 ---
 
@@ -206,42 +236,52 @@ This reduces P99 query latency by ~30% vs round-robin routing.
 
 | Benchmark | Target |
 |---|---|
-| Single-node HNSW insert | > 50,000 vectors/sec (128-dim float32) |
-| Single-node k-NN search P99 | < 2ms at ef=100, 1M vectors |
-| RAFT commit latency (3-node) | < 5ms P99 on localhost |
-| Distributed search (3 shards) | < 10ms P99 end-to-end |
-| ML routing overhead | < 0.5ms per query prediction |
+| Single-node HNSW insert throughput | > 50,000 vectors / sec (128-dim float32) |
+| Single-node k-NN search P99 | < 2 ms at `ef=100`, 1M vectors |
+| RAFT commit latency (3-node cluster) | < 5 ms P99 on localhost |
+| Distributed search (3 shards) | < 10 ms P99 end-to-end |
+| ML routing inference overhead | < 0.5 ms per query |
 
 ---
 
-## What "Done" Looks Like
+## Roadmap
 
-A complete v1 will be able to:
-1. Start a 3-node cluster (1 metadata server, 2 shard servers, 1 router)
-2. Insert 1M 128-dimensional float32 vectors via gRPC
-3. Query k=10 nearest neighbors with latency < 10ms P99
-4. Kill the leader node — cluster re-elects within 300ms, continues serving reads
-5. Kill one shard — router falls back to replica, no data loss
-6. Show ML routing choosing the faster shard 80%+ of the time vs round-robin
-7. Prometheus dashboard showing QPS, latency, RAFT term, and shard health
+- [x] Phase 1 — Foundations (error, config, logging, metrics, clock, serialization, thread pool)
+- [x] Phase 2 — Storage Engine (WAL, MemTable, SSTable, compaction, recovery, cache, checkpoint)
+- [ ] Phase 3 — RAFT Consensus *(in progress — `raft_state` complete)*
+- [ ] Phase 4 — Vector Engine (HNSW, IVF, PQ, SIMD distance functions)
+- [ ] Phase 5 — Router, Shard Manager, Metadata Server
+- [ ] Phase 6 — ML Routing Layer
+- [ ] Phase 7 — gRPC API, REST adapter, server entry points
 
 ---
 
 ## References
 
-| Category | Paper / Resource |
+| Topic | Source |
 |---|---|
-| Storage | [LevelDB Implementation Notes](https://github.com/google/leveldb/blob/main/doc/impl.md) |
-| Storage | [WiscKey — Separating Keys from Values](https://www.usenix.org/system/files/conference/fast16/fast16-papers-lu.pdf) |
-| Consensus | [RAFT — In Search of an Understandable Consensus Algorithm](https://raft.github.io/raft.pdf) |
-| Consensus | [RAFT Refloated — Practical Edge Cases](https://www.cl.cam.ac.uk/~ms705/pub/papers/2015-osr-raft.pdf) |
-| Vector Search | [HNSW — Efficient Approximate Nearest Neighbor Search](https://arxiv.org/abs/1603.09320) |
-| Vector Search | [Faiss — A Library for Efficient Similarity Search](https://arxiv.org/abs/1702.08734) |
-| Distributed Systems | [Google Spanner](https://research.google/pubs/pub39966/) |
-| Distributed Systems | [Amazon Dynamo](https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf) |
+| LSM-Tree storage | [LevelDB Implementation Notes](https://github.com/google/leveldb/blob/main/doc/impl.md) |
+| Key-value separation | [WiscKey (FAST '16)](https://www.usenix.org/system/files/conference/fast16/fast16-papers-lu.pdf) |
+| Consensus | [RAFT — Ongaro & Ousterhout (2014)](https://raft.github.io/raft.pdf) |
+| Consensus edge cases | [RAFT Refloated (EuroSys '15)](https://www.cl.cam.ac.uk/~ms705/pub/papers/2015-osr-raft.pdf) |
+| Graph ANN | [HNSW — Malkov & Yashunin (2018)](https://arxiv.org/abs/1603.09320) |
+| Similarity search | [Faiss — Johnson et al. (2017)](https://arxiv.org/abs/1702.08734) |
+| Distributed storage | [Google Spanner (OSDI '12)](https://research.google/pubs/pub39966/) |
+| Distributed storage | [Amazon Dynamo (SOSP '07)](https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf) |
+
+---
+
+## Contributing
+
+Contributions, bug reports, and feature requests are welcome. Please open an issue before submitting a pull request for significant changes.
+
+```bash
+# Format before committing
+clang-format -i src/**/*.h src/**/*.cpp
+```
 
 ---
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+Distributed under the MIT License. See [LICENSE](LICENSE) for details.
