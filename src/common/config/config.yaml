@@ -1,0 +1,19 @@
+node:
+  node_id: "shard-node-1"
+  listen_address: "0.0.0.0:50051"
+  role: "shard"
+
+storage:
+  data_dir: "/tmp/vectordb_data"
+  memtable_size_mb: 128
+  block_cache_mb: 512
+
+raft:
+  election_timeout_ms: 300
+  heartbeat_interval_ms: 50
+  snapshot_threshold: 50000
+
+cluster:
+  peers:
+    - "10.0.0.1:50051"
+    - "10.0.0.2:50051"

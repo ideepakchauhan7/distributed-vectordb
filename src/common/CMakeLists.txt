@@ -1,0 +1,8 @@
+add_subdirectory(error)
+add_subdirectory(config)
+add_subdirectory(logging)
+add_subdirectory(metrics)
+add_subdirectory(clock)
+add_subdirectory(thread_pool)
+add_subdirectory(serialization)
+add_subdirectory(utils)

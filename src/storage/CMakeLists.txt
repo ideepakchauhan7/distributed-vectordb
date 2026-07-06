@@ -1,0 +1,8 @@
+add_subdirectory(wal)
+add_subdirectory(memtable)
+add_subdirectory(sstable)
+add_subdirectory(compaction)
+add_subdirectory(recovery)
+add_subdirectory(cache)
+add_subdirectory(checkpoint)
+add_subdirectory(engine)

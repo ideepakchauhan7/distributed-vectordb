@@ -1,0 +1,6 @@
+add_subdirectory(core)
+# add_subdirectory(storage)
+# add_subdirectory(election)
+# add_subdirectory(replication)
+# add_subdirectory(snapshot)
+# add_subdirectory(membership)
