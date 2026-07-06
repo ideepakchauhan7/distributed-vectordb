@@ -115,67 +115,6 @@ cd build
 
 ---
 
-## Project Structure
-
-```
-distributed-vectordb/
-├── src/
-│   ├── common/               # Shared utilities
-│   │   ├── clock/            # Hybrid Logical Clock (HLC)
-│   │   ├── config/           # YAML config parsing
-│   │   ├── error/            # Status / ErrorOr<T> (exception-free)
-│   │   ├── logging/          # Structured JSON logging (spdlog)
-│   │   ├── metrics/          # Prometheus counters/histograms/gauges
-│   │   ├── serialization/    # Binary encoder / decoder
-│   │   ├── thread_pool/      # Work-stealing thread pool
-│   │   └── utils/            # UUID, string helpers
-│   │
-│   ├── storage/              # LSM-tree storage engine
-│   │   ├── wal/              # Write-Ahead Log (fsync, CRC32, LSN)
-│   │   ├── memtable/         # In-memory concurrent skip list
-│   │   ├── sstable/          # Sorted String Tables + block index + bloom filter
-│   │   ├── compaction/       # Leveled compaction manager
-│   │   ├── recovery/         # WAL replay on startup
-│   │   ├── cache/            # LRU block cache
-│   │   ├── checkpoint/       # Atomic state snapshots
-│   │   └── engine/           # StorageEngine — unified LSM facade
-│   │
-│   ├── raft/                 # RAFT consensus layer
-│   │   ├── core/             # RaftState FSM · RaftTimer · RaftNode orchestrator
-│   │   ├── storage/          # TermStore (crash-safe) · RaftLog
-│   │   ├── election/         # RequestVote RPC · leader election
-│   │   ├── replication/      # AppendEntries · nextIndex[] · commitIndex
-│   │   ├── snapshot/         # Log compaction · InstallSnapshot RPC
-│   │   └── membership/       # Joint consensus for cluster membership changes
-│   │
-│   ├── vector_engine/        # ANN indexing
-│   │   ├── index/hnsw/       # Hierarchical Navigable Small World
-│   │   ├── index/ivf/        # Inverted File Index
-│   │   ├── index/pq/         # Product Quantization
-│   │   └── index/brute_force/# Baseline linear scan
-│   │
-│   ├── router/               # Query planner, shard selector, result merger
-│   ├── metadata/             # Cluster metadata (RAFT-backed)
-│   ├── shard/                # Shard manager, consistent hashing
-│   ├── api/                  # gRPC service definitions + REST adapter
-│   ├── server/               # Node server entry points
-│   └── execution/            # Insert, search, delete pipelines
-│
-├── tests/
-│   ├── unit/                 # Per-component isolation tests
-│   ├── integration/          # Multi-component tests with real I/O
-│   ├── load/                 # Throughput and latency benchmarks
-│   └── chaos/                # Fault injection: node kill, network partition
-│
-├── proto/                    # Protocol Buffer definitions
-├── ml/                       # Python ML routing model (XGBoost)
-├── benchmarks/               # Standalone performance benchmarks
-├── docs/                     # Architecture decision records
-└── CMakeLists.txt
-```
-
----
-
 ## Storage Engine Design
 
 The storage layer follows the **LSM-Tree** (Log-Structured Merge Tree) write path:
@@ -241,18 +180,6 @@ Result: **~30% reduction in P99 latency** versus round-robin routing, with sub-m
 | RAFT commit latency (3-node cluster) | < 5 ms P99 on localhost |
 | Distributed search (3 shards) | < 10 ms P99 end-to-end |
 | ML routing inference overhead | < 0.5 ms per query |
-
----
-
-## Roadmap
-
-- [x] Phase 1 — Foundations (error, config, logging, metrics, clock, serialization, thread pool)
-- [x] Phase 2 — Storage Engine (WAL, MemTable, SSTable, compaction, recovery, cache, checkpoint)
-- [ ] Phase 3 — RAFT Consensus *(in progress — `raft_state` complete)*
-- [ ] Phase 4 — Vector Engine (HNSW, IVF, PQ, SIMD distance functions)
-- [ ] Phase 5 — Router, Shard Manager, Metadata Server
-- [ ] Phase 6 — ML Routing Layer
-- [ ] Phase 7 — gRPC API, REST adapter, server entry points
 
 ---
 
