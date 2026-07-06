@@ -1,0 +1,3 @@
+add_executable(test_storage_engine test_storage_engine.cpp)
+target_link_libraries(test_storage_engine PRIVATE storage_engine)
+add_test(NAME StorageEngineTest COMMAND test_storage_engine)
